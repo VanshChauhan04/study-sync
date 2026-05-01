@@ -318,15 +318,37 @@ export function HomeExperience({
     setAiAnswer("StudySync AI is thinking...");
     setToast("StudySync AI is writing an answer...");
 
-    const res = await fetch("/api/ai/ask", {
+    let res = await fetch("/api/ai/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ groupId: selectedGroup.id, question })
     });
 
+    if (res.status === 403) {
+      const joinRes = await fetch(`/api/groups/${selectedGroup.id}/join`, { method: "POST" });
+      if (joinRes.ok) {
+        setJoinedGroups((current) => Array.from(new Set([selectedGroup.id, ...current])));
+        setDemoGroups((current) =>
+          current.map((item) => {
+            if (item.id !== selectedGroup.id || item.members >= item.capacity) return item;
+            return { ...item, members: item.members + 1 };
+          })
+        );
+        res = await fetch("/api/ai/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groupId: selectedGroup.id, question })
+        });
+      }
+    }
+
     if (!res.ok) {
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      setAiAnswer(data?.error ?? "AI request failed. Try again.");
+      const message =
+        data?.error === "Forbidden"
+          ? "Join this room before asking StudySync AI."
+          : data?.error ?? "AI request failed. Try again.";
+      setAiAnswer(message);
       setToast("AI request failed. Try again.");
       return;
     }
