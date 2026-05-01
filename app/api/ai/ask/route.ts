@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
   try {
     if (geminiKey) {
-      const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+      const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
       const genAI = new GoogleGenerativeAI(geminiKey);
       const model = genAI.getGenerativeModel({ model: modelName });
       const prompt = [
