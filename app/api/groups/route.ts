@@ -107,12 +107,17 @@ export async function POST(req: Request) {
     }
   });
 
-  await prisma.membership.create({
-    data: {
-      userId: user.id,
-      groupId: created.id
-    }
-  });
+  await prisma.$transaction([
+    prisma.membership.deleteMany({
+      where: { userId: user.id }
+    }),
+    prisma.membership.create({
+      data: {
+        userId: user.id,
+        groupId: created.id
+      }
+    })
+  ]);
 
   const capacity = created.maxMembers;
   const members = 1;

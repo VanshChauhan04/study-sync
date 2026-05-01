@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { prisma } from "@/lib/prisma";
 import { getAiDbUser, getAuthedDbUser } from "@/lib/auth";
 
@@ -11,6 +10,46 @@ function fallbackAnswer(question: string, subject: string) {
   }
 
   return `For ${subject}, start by defining the state/goal, work a tiny example, then generalize the rule. Question: ${q}`;
+}
+
+function normalizeGeminiModel(model: string | undefined) {
+  return (model || "gemini-2.5-flash")
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/^models\//, "");
+}
+
+async function generateGeminiAnswer(apiKey: string, modelName: string, prompt: string) {
+  const modelCandidates = Array.from(
+    new Set([modelName, "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"])
+  );
+
+  for (const model of modelCandidates) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }]
+        })
+      }
+    );
+
+    if (res.ok) {
+      const data = (await res.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      return data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim() ?? "";
+    }
+
+    if (res.status !== 404) {
+      const errorText = await res.text().catch(() => "");
+      throw new Error(`Gemini request failed with ${res.status}: ${errorText}`);
+    }
+  }
+
+  throw new Error("No configured Gemini model was found.");
 }
 
 export async function POST(req: Request) {
@@ -52,9 +91,7 @@ export async function POST(req: Request) {
 
   try {
     if (geminiKey) {
-      const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-      const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: modelName });
+      const modelName = normalizeGeminiModel(process.env.GEMINI_MODEL);
       const prompt = [
         "You are StudySync AI. Keep answers concise, practical, and aligned to the group subject.",
         `Subject: ${group.subject}`,
@@ -62,8 +99,7 @@ export async function POST(req: Request) {
         `Question: ${question}`
       ].join("\n");
 
-      const result = await model.generateContent(prompt);
-      answer = result.response.text().trim() || fallbackAnswer(question, group.subject);
+      answer = (await generateGeminiAnswer(geminiKey, modelName, prompt)) || fallbackAnswer(question, group.subject);
     } else if (openaiKey) {
       const client = new OpenAI({ apiKey: openaiKey });
       const completion = await client.chat.completions.create({

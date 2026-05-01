@@ -140,7 +140,7 @@ export function HomeExperience({
       if (cancelled) return;
 
       setDemoGroups(data.groups);
-      setJoinedGroups(data.groups.filter((g) => g.isMember).map((g) => g.id));
+      setJoinedGroups(data.groups.filter((g) => g.isMember).map((g) => g.id).slice(0, 1));
       setSelectedGroupId((current) => {
         if (data.groups.some((g) => g.id === current)) {
           return current;
@@ -268,14 +268,21 @@ export function HomeExperience({
     setSelectedGroupId(groupId);
     setDemoGroups((current) =>
       current.map((item) => {
-        if (item.id !== groupId) return item;
-        return {
-          ...item,
-          members: isJoined ? Math.max(0, item.members - 1) : Math.min(item.capacity, item.members + 1)
-        };
+        if (item.id === groupId) {
+          return {
+            ...item,
+            members: isJoined ? Math.max(0, item.members - 1) : Math.min(item.capacity, item.members + 1)
+          };
+        }
+
+        if (!isJoined && joinedGroups.includes(item.id)) {
+          return { ...item, members: Math.max(0, item.members - 1) };
+        }
+
+        return item;
       })
     );
-    setJoinedGroups((current) => (isJoined ? current.filter((id) => id !== groupId) : [...current, groupId]));
+    setJoinedGroups(isJoined ? [] : [groupId]);
 
     const endpoint = isJoined ? `/api/groups/${groupId}/leave` : `/api/groups/${groupId}/join`;
     const res = await fetch(endpoint, { method: "POST" });
@@ -289,9 +296,22 @@ export function HomeExperience({
           };
         })
       );
-      setJoinedGroups((current) => (isJoined ? [...current, groupId] : current.filter((id) => id !== groupId)));
+      setJoinedGroups(isJoined ? [groupId] : joinedGroups.filter((id) => id !== groupId));
       setToast("Action failed. Please try again.");
       return;
+    }
+
+    const data = (await res.json().catch(() => null)) as
+      | { groups?: Array<{ id: string; members: number; isMember: boolean }> }
+      | null;
+    if (data?.groups) {
+      setDemoGroups((current) =>
+        current.map((item) => {
+          const updated = data.groups?.find((group) => group.id === item.id);
+          return updated ? { ...item, members: updated.members } : item;
+        })
+      );
+      setJoinedGroups(data.groups.filter((item) => item.isMember).map((item) => item.id).slice(0, 1));
     }
 
     setToast(isJoined ? `You left ${group.title}.` : `Joined ${group.title}. Seat count and dashboard updated.`);
@@ -327,7 +347,7 @@ export function HomeExperience({
     if (res.status === 403) {
       const joinRes = await fetch(`/api/groups/${selectedGroup.id}/join`, { method: "POST" });
       if (joinRes.ok) {
-        setJoinedGroups((current) => Array.from(new Set([selectedGroup.id, ...current])));
+        setJoinedGroups([selectedGroup.id]);
         setDemoGroups((current) =>
           current.map((item) => {
             if (item.id !== selectedGroup.id || item.members >= item.capacity) return item;
@@ -384,7 +404,7 @@ export function HomeExperience({
       });
 
       setDemoGroups((current) => [createdGroup, ...current]);
-      setJoinedGroups((current) => Array.from(new Set([createdGroup.id, ...current])));
+      setJoinedGroups([createdGroup.id]);
       setSelectedSubject("All");
       setSelectedGroupId(createdGroup.id);
       setMessagesByGroup((current) => ({
@@ -422,7 +442,7 @@ export function HomeExperience({
     const createdGroup = data.group;
 
     setDemoGroups((current) => [createdGroup, ...current]);
-    setJoinedGroups((current) => Array.from(new Set([createdGroup.id, ...current])));
+    setJoinedGroups([createdGroup.id]);
     setSelectedSubject("All");
     setSelectedGroupId(createdGroup.id);
     setToast(`${createdGroup.title} is live and joined as your group.`);

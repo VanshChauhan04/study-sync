@@ -24,16 +24,52 @@ export async function POST(
     where: { userId_groupId: { userId: user.id, groupId: id } }
   });
   if (already) {
-    return NextResponse.json({ ok: true });
+    await prisma.membership.deleteMany({
+      where: {
+        userId: user.id,
+        groupId: { not: id }
+      }
+    });
+
+    const groups = await getMembershipSnapshot(user.id);
+    return NextResponse.json({ ok: true, groups });
   }
 
   if (group._count.memberships >= group.maxMembers) {
     return NextResponse.json({ error: "Group is full" }, { status: 409 });
   }
 
-  await prisma.membership.create({
-    data: { userId: user.id, groupId: id }
+  await prisma.$transaction([
+    prisma.membership.deleteMany({
+      where: {
+        userId: user.id,
+        groupId: { not: id }
+      }
+    }),
+    prisma.membership.create({
+      data: { userId: user.id, groupId: id }
+    })
+  ]);
+
+  const groups = await getMembershipSnapshot(user.id);
+
+  return NextResponse.json({ ok: true, groups });
+}
+
+async function getMembershipSnapshot(userId: string) {
+  const groups = await prisma.group.findMany({
+    include: {
+      _count: { select: { memberships: true } },
+      memberships: {
+        where: { userId },
+        select: { id: true }
+      }
+    }
   });
 
-  return NextResponse.json({ ok: true });
+  return groups.map((group) => ({
+    id: group.id,
+    members: group._count.memberships,
+    isMember: group.memberships.length > 0
+  }));
 }
