@@ -3,7 +3,7 @@ import nextTypescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
   {
-    ignores: [".next/**", "node_modules/**", "tsconfig.tsbuildinfo"]
+    ignores: [".next/**", "node_modules/**", "prisma/seed.js", "tsconfig.tsbuildinfo"]
   },
   ...nextVitals,
   ...nextTypescript

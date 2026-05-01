@@ -7,19 +7,37 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "postinstall": "node ./node_modules/prisma/build/index.js generate",
+    "prisma:generate": "node ./node_modules/prisma/build/index.js generate",
+    "prisma:migrate": "node ./node_modules/prisma/build/index.js migrate dev",
+    "prisma:deploy": "node ./node_modules/prisma/build/index.js migrate deploy",
+    "prisma:studio": "node ./node_modules/prisma/build/index.js studio",
+    "prisma:seed": "node ./node_modules/prisma/build/index.js db seed"
   },
   "dependencies": {
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "@clerk/nextjs": "7.2.7",
+    "@google/generative-ai": "0.24.1",
+    "@prisma/adapter-pg": "7.8.0",
+    "@prisma/client": "7.8.0",
+    "dotenv": "17.4.2",
+    "next": "16.2.4",
+    "openai": "6.35.0",
+    "pg": "8.20.0",
+    "react": "19.2.5",
+    "react-dom": "19.2.5"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "eslint": "latest",
-    "eslint-config-next": "latest",
-    "typescript": "latest"
+    "@types/node": "24.1.0",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "@types/pg": "8.20.0",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.4",
+    "prisma": "7.8.0",
+    "typescript": "6.0.3"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   }
 }

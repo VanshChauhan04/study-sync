@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useEffect, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
+import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { Icon } from "@/components/icons";
 import {
   createAiAnswer,
@@ -14,7 +15,6 @@ import type {
   ActiveSession,
   ChatMessage,
   DashboardMetric,
-  DemoState,
   PlannerDay,
   PlannerInput,
   StudentProfile,
@@ -37,8 +37,6 @@ const navItems = [
   { href: "#progress", label: "Progress" }
 ];
 
-const storageKey = "studysync-demo-state-v1";
-
 const defaultPlannerInput: PlannerInput = {
   examDate: "2026-05-02",
   hoursPerDay: "2",
@@ -53,6 +51,7 @@ export function HomeExperience({
   plannerDays,
   profile
 }: HomeExperienceProps) {
+  const { isSignedIn } = useAuth();
   const [demoGroups, setDemoGroups] = useState(groups);
   const [selectedSubject, setSelectedSubject] = useState("All");
   const [search, setSearch] = useState("");
@@ -68,8 +67,7 @@ export function HomeExperience({
   const [messagesByGroup, setMessagesByGroup] = useState<Record<string, ChatMessage[]>>({});
   const [summariesByGroup, setSummariesByGroup] = useState<Record<string, string[]>>({});
   const [chatDraft, setChatDraft] = useState("");
-  const [toast, setToast] = useState("Demo state saves locally, so refresh will keep joined groups and plans.");
-  const [hasLoadedState, setHasLoadedState] = useState(false);
+  const [toast, setToast] = useState("Sign in to sync groups, chat, and plans across devices.");
   const [groupDraft, setGroupDraft] = useState({
     capacity: "6",
     description: "Solve recent exam questions and build a shared revision note.",
@@ -80,9 +78,8 @@ export function HomeExperience({
 
   const deferredSearch = useDeferredValue(search);
   const subjects = ["All", ...Array.from(new Set(demoGroups.map((group) => group.subject)))];
-  const selectedGroup = demoGroups.find((group) => group.id === selectedGroupId) ?? demoGroups[0];
-  const groupMessages = messagesByGroup[selectedGroup.id] ?? activeSession.messages;
-  const sessionSummary = summariesByGroup[selectedGroup.id] ?? [];
+  const selectedGroup =
+    demoGroups.find((group) => group.id === selectedGroupId) ?? demoGroups[0] ?? groups[0];
   const joinedCount = joinedGroups.length;
   const studentMessageCount = Object.values(messagesByGroup)
     .flat()
@@ -127,56 +124,136 @@ export function HomeExperience({
   });
 
   useEffect(() => {
-    window.setTimeout(() => {
-      try {
-        const saved = window.localStorage.getItem(storageKey);
-        if (!saved) {
-          setHasLoadedState(true);
-          return;
-        }
-
-        const parsed = JSON.parse(saved) as Partial<DemoState>;
-        setDemoGroups(parsed.groups?.length ? parsed.groups : groups);
-        setJoinedGroups(parsed.joinedGroupIds ?? []);
-        setCurrentPlan(parsed.plannerDays?.length ? parsed.plannerDays : plannerDays);
-        setPlannerInput(parsed.plannerInput ?? defaultPlannerInput);
-        setMessagesByGroup(parsed.messagesByGroup ?? {});
-        setSummariesByGroup(parsed.summariesByGroup ?? {});
-        setPlannerGenerated(Boolean(parsed.plannerDays?.length));
-      } catch {
-        setToast("Saved demo state could not be loaded, so StudySync started fresh.");
-      } finally {
-        setHasLoadedState(true);
-      }
-    }, 0);
-  }, [groups, plannerDays]);
-
-  useEffect(() => {
-    if (!hasLoadedState) {
+    if (!isSignedIn) {
       return;
     }
 
-    const state: DemoState = {
-      groups: demoGroups,
-      joinedGroupIds: joinedGroups,
-      plannerDays: currentPlan,
-      plannerInput,
-      messagesByGroup,
-      summariesByGroup
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/groups", { cache: "no-store" });
+      if (!res.ok) {
+        setToast("Could not load groups. Try refreshing.");
+        return;
+      }
+
+      const data = (await res.json()) as { groups: Array<StudyGroup & { isMember: boolean }> };
+      if (cancelled) return;
+
+      setDemoGroups(data.groups);
+      setJoinedGroups(data.groups.filter((g) => g.isMember).map((g) => g.id));
+      setSelectedGroupId((current) => {
+        if (data.groups.some((g) => g.id === current)) {
+          return current;
+        }
+        return data.groups[0]?.id ?? "";
+      });
+    })().catch(() => {
+      setToast("Could not load groups. Try refreshing.");
+    });
+
+    return () => {
+      cancelled = true;
     };
+  }, [groups, isSignedIn]);
 
-    window.localStorage.setItem(storageKey, JSON.stringify(state));
-  }, [
-    currentPlan,
-    demoGroups,
-    hasLoadedState,
-    joinedGroups,
-    messagesByGroup,
-    plannerInput,
-    summariesByGroup
-  ]);
+  useEffect(() => {
+    if (!isSignedIn) {
+      return;
+    }
 
-  function handleJoin(groupId: string) {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/plans", { cache: "no-store" });
+      if (!res.ok) {
+        return;
+      }
+
+      const data = (await res.json()) as { plan: null | { content: unknown } };
+      if (cancelled) return;
+
+      const content = data.plan?.content as
+        | { plannerInput?: PlannerInput; plannerDays?: PlannerDay[] }
+        | undefined;
+
+      if (content?.plannerDays?.length) {
+        setCurrentPlan(content.plannerDays);
+        setPlannerGenerated(true);
+      }
+      if (content?.plannerInput) {
+        setPlannerInput(content.plannerInput);
+      }
+    })().catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      return;
+    }
+    if (!selectedGroupId) {
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/messages?groupId=${encodeURIComponent(selectedGroupId)}`, {
+        cache: "no-store"
+      });
+      if (!res.ok) {
+        return;
+      }
+
+      const data = (await res.json()) as {
+        messages: Array<{ id: string; sender: string; role: "student" | "ai"; content: string; createdAt: string }>;
+      };
+
+      if (cancelled) return;
+
+      const formatted: ChatMessage[] = data.messages.map((m) => ({
+        id: m.id,
+        sender: m.sender,
+        role: m.role,
+        content: m.content,
+        time: new Intl.DateTimeFormat("en", {
+          hour: "numeric",
+          minute: "2-digit"
+        }).format(new Date(m.createdAt))
+      }));
+
+      setMessagesByGroup((current) => ({
+        ...current,
+        [selectedGroupId]: formatted
+      }));
+    })().catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, selectedGroupId]);
+
+  if (!selectedGroup) {
+    return (
+      <main className="app-shell">
+        <Navigation isSignedIn={Boolean(isSignedIn)} />
+        <div className="status-toast" role="status">
+          <span>No groups available yet.</span>
+        </div>
+      </main>
+    );
+  }
+
+  const groupMessages = messagesByGroup[selectedGroup.id] ?? activeSession.messages;
+  const sessionSummary = summariesByGroup[selectedGroup.id] ?? [];
+
+  async function handleJoin(groupId: string) {
+    if (!isSignedIn) {
+      setToast("Sign in to join groups and keep your progress synced.");
+      return;
+    }
+
     const group = demoGroups.find((item) => item.id === groupId);
     if (!group) {
       return;
@@ -188,12 +265,10 @@ export function HomeExperience({
       return;
     }
 
+    setSelectedGroupId(groupId);
     setDemoGroups((current) =>
       current.map((item) => {
-        if (item.id !== groupId) {
-          return item;
-        }
-
+        if (item.id !== groupId) return item;
         return {
           ...item,
           members: isJoined ? Math.max(0, item.members - 1) : Math.min(item.capacity, item.members + 1)
@@ -201,48 +276,128 @@ export function HomeExperience({
       })
     );
     setJoinedGroups((current) => (isJoined ? current.filter((id) => id !== groupId) : [...current, groupId]));
-    setSelectedGroupId(groupId);
+
+    const endpoint = isJoined ? `/api/groups/${groupId}/leave` : `/api/groups/${groupId}/join`;
+    const res = await fetch(endpoint, { method: "POST" });
+    if (!res.ok) {
+      setDemoGroups((current) =>
+        current.map((item) => {
+          if (item.id !== groupId) return item;
+          return {
+            ...item,
+            members: isJoined ? Math.min(item.capacity, item.members + 1) : Math.max(0, item.members - 1)
+          };
+        })
+      );
+      setJoinedGroups((current) => (isJoined ? [...current, groupId] : current.filter((id) => id !== groupId)));
+      setToast("Action failed. Please try again.");
+      return;
+    }
+
     setToast(isJoined ? `You left ${group.title}.` : `Joined ${group.title}. Seat count and dashboard updated.`);
   }
 
-  function handleAskAi() {
+  async function handleAskAi() {
     const question = aiQuestion.trim();
     if (!question) {
       setAiAnswer("Type a doubt first so StudySync AI can anchor the answer to this session.");
       return;
     }
 
-    const answer = createAiAnswer(question, selectedGroup, activeSession.whiteboardNotes);
+    if (!isSignedIn) {
+      const answer = createAiAnswer(question, selectedGroup, activeSession.whiteboardNotes);
+      setMessagesByGroup((current) => ({
+        ...current,
+        [selectedGroup.id]: [...(current[selectedGroup.id] ?? activeSession.messages), answer]
+      }));
+      setAiAnswer(answer.content);
+      setToast("Sign in to persist AI answers to your group room.");
+      return;
+    }
+
+    const res = await fetch("/api/ai/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupId: selectedGroup.id, question })
+    });
+
+    if (!res.ok) {
+      setToast("AI request failed. Try again.");
+      return;
+    }
+
+    const data = (await res.json()) as {
+      message: { id: string; sender: string; role: "ai"; content: string; createdAt: string };
+    };
+
+    const formatted: ChatMessage = {
+      id: data.message.id,
+      sender: data.message.sender,
+      role: "ai",
+      content: data.message.content,
+      time: new Intl.DateTimeFormat("en", {
+        hour: "numeric",
+        minute: "2-digit"
+      }).format(new Date(data.message.createdAt))
+    };
+
     setMessagesByGroup((current) => ({
       ...current,
-      [selectedGroup.id]: [...(current[selectedGroup.id] ?? activeSession.messages), answer]
+      [selectedGroup.id]: [...(current[selectedGroup.id] ?? []), formatted]
     }));
-    setAiAnswer(answer.content);
+    setAiAnswer(formatted.content);
     setToast("StudySync AI added an answer to the live room.");
   }
 
-  function createStudyGroup() {
-    const createdGroup = createGroupFromForm({
-      ...groupDraft,
-      institution: profile.institution
+  async function createStudyGroup() {
+    if (!isSignedIn) {
+      const createdGroup = createGroupFromForm({
+        ...groupDraft,
+        institution: profile.institution
+      });
+
+      setDemoGroups((current) => [createdGroup, ...current]);
+      setJoinedGroups((current) => Array.from(new Set([createdGroup.id, ...current])));
+      setSelectedSubject("All");
+      setSelectedGroupId(createdGroup.id);
+      setMessagesByGroup((current) => ({
+        ...current,
+        [createdGroup.id]: [
+          {
+            id: `welcome-${createdGroup.id}`,
+            sender: "StudySync AI",
+            role: "ai",
+            content: `I created a live room for ${createdGroup.title}. Sign in to persist this room for everyone.`,
+            time: "Now"
+          }
+        ]
+      }));
+      setToast("Sign in to persist newly created groups to the database.");
+      return;
+    }
+
+    const res = await fetch("/api/groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: groupDraft.title,
+        subject: groupDraft.subject,
+        capacity: Number.parseInt(groupDraft.capacity, 10)
+      })
     });
+
+    if (!res.ok) {
+      setToast("Could not create group. Check your inputs and try again.");
+      return;
+    }
+
+    const data = (await res.json()) as { group: StudyGroup & { isMember: boolean } };
+    const createdGroup = data.group;
 
     setDemoGroups((current) => [createdGroup, ...current]);
     setJoinedGroups((current) => Array.from(new Set([createdGroup.id, ...current])));
     setSelectedSubject("All");
     setSelectedGroupId(createdGroup.id);
-    setMessagesByGroup((current) => ({
-      ...current,
-      [createdGroup.id]: [
-        {
-          id: `welcome-${createdGroup.id}`,
-          sender: "StudySync AI",
-          role: "ai",
-          content: `I created a live room for ${createdGroup.title}. Add a first message or generate a session summary after discussion.`,
-          time: "Now"
-        }
-      ]
-    }));
     setToast(`${createdGroup.title} is live and joined as your group.`);
     setGroupDraft((current) => ({
       ...current,
@@ -270,24 +425,68 @@ export function HomeExperience({
     setCurrentPlan(generated);
     setPlannerGenerated(true);
     setToast("Generated a new weekly plan from your exam date, hours, weak topic, and joined groups.");
+
+    if (isSignedIn) {
+      void fetch("/api/plans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: { plannerInput, plannerDays: generated } })
+      });
+    }
   }
 
-  function handleSendMessage(event: FormEvent<HTMLFormElement>) {
+  async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = chatDraft.trim();
     if (!message) {
       return;
     }
 
+    if (!isSignedIn) {
+      setMessagesByGroup((current) => ({
+        ...current,
+        [selectedGroup.id]: [
+          ...(current[selectedGroup.id] ?? activeSession.messages),
+          createStudentMessage(message, profile.name.split(" ")[0] || profile.name)
+        ]
+      }));
+      setChatDraft("");
+      setToast("Sign in to persist messages to the group room.");
+      return;
+    }
+
+    const res = await fetch("/api/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupId: selectedGroup.id, content: message })
+    });
+
+    if (!res.ok) {
+      setToast("Message failed to send. Join the group first.");
+      return;
+    }
+
+    const data = (await res.json()) as {
+      message: { id: string; sender: string; role: "student"; content: string; createdAt: string };
+    };
+
+    const formatted: ChatMessage = {
+      id: data.message.id,
+      sender: data.message.sender,
+      role: "student",
+      content: data.message.content,
+      time: new Intl.DateTimeFormat("en", {
+        hour: "numeric",
+        minute: "2-digit"
+      }).format(new Date(data.message.createdAt))
+    };
+
     setMessagesByGroup((current) => ({
       ...current,
-      [selectedGroup.id]: [
-        ...(current[selectedGroup.id] ?? activeSession.messages),
-        createStudentMessage(message, profile.name.split(" ")[0] || profile.name)
-      ]
+      [selectedGroup.id]: [...(current[selectedGroup.id] ?? []), formatted]
     }));
     setChatDraft("");
-    setToast("Message added to the live room and saved locally.");
+    setToast("Message sent.");
   }
 
   function handleGenerateSummary() {
@@ -301,7 +500,6 @@ export function HomeExperience({
   }
 
   function handleResetDemo() {
-    window.localStorage.removeItem(storageKey);
     setDemoGroups(groups);
     setJoinedGroups([]);
     setCurrentPlan(plannerDays);
@@ -310,12 +508,12 @@ export function HomeExperience({
     setSummariesByGroup({});
     setPlannerGenerated(false);
     setSelectedGroupId(groups[0]?.id ?? "");
-    setToast("Demo state reset. You can now rehearse the flow from a clean slate.");
+    setToast("Reset local demo state.");
   }
 
   return (
     <main className="app-shell">
-      <Navigation />
+      <Navigation isSignedIn={Boolean(isSignedIn)} />
       <div className="status-toast" role="status">
         <span>{toast}</span>
         <button onClick={handleResetDemo} type="button">
@@ -707,7 +905,7 @@ export function HomeExperience({
   );
 }
 
-function Navigation() {
+function Navigation({ isSignedIn }: { isSignedIn: boolean }) {
   return (
     <header className="topbar">
       <a className="brand" href="#discover" aria-label="StudySync home">
@@ -721,9 +919,20 @@ function Navigation() {
           </a>
         ))}
       </nav>
-      <a className="button nav-button" href="#groups">
-        Find a group
-      </a>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <a className="button nav-button" href="#groups">
+          Find a group
+        </a>
+        {!isSignedIn ? (
+          <SignInButton>
+            <button className="button secondary compact" type="button">
+              Sign in
+            </button>
+          </SignInButton>
+        ) : (
+          <UserButton />
+        )}
+      </div>
     </header>
   );
 }
@@ -799,7 +1008,7 @@ function GroupCard({
   onJoin: () => void;
   onSelect: () => void;
 }) {
-  const seats = Math.min(group.capacity, group.members + (isJoined ? 1 : 0));
+  const seats = Math.min(group.capacity, group.members);
 
   return (
     <article className={`group-card ${group.accent} ${isSelected ? "selected" : ""}`}>

@@ -7,19 +7,24 @@ AI-powered study group finder MVP for hackathon.
 - Search and filter study groups.
 - Join or leave groups with live seat-count updates.
 - Create a new study group and immediately join it.
-- Persist demo state in the browser with `localStorage`.
+- Persist groups, memberships, messages, and plans in PostgreSQL.
 - Generate a weekly study plan from exam date, hours/day, subject, weak topic, and joined groups.
 - Send live-room chat messages.
 - Ask the in-room StudySync AI for contextual help.
 - Generate a session summary from the current room messages.
 - Watch dashboard metrics update from joined groups, chat contributions, and summaries.
 
-This is intentionally Vercel-friendly and does not require a database for the first demo. For true multi-user persistence across devices, add Supabase, Vercel Postgres, Neon, or another hosted database and replace the local demo storage.
+This build uses PostgreSQL + Prisma for persistence, Clerk for auth, and Gemini or OpenAI (optional) for AI answers.
 
 ## Run locally
 
+1. Create `.env` based on `.env.example`.
+2. Fill in `DATABASE_URL`, Clerk keys, and optionally `GEMINI_API_KEY` or `OPENAI_API_KEY`.
+
 ```bash
 npm install
+npm run prisma:migrate
+npm run prisma:seed
 npm run dev
 ```
 
@@ -38,7 +43,7 @@ npm run build
 1. Push this folder to GitHub.
 2. Import the repository in Vercel.
 3. Use the default Next.js settings.
-4. Build command: `npm run build`.
-5. Output directory: leave empty/default.
-
-No environment variables are required for this browser-persistent demo build.
+4. Set environment variables in Vercel (see `.env.example`).
+5. Run database migrations (recommended) using `npm run prisma:deploy`.
+6. Build command: `npm run build`.
+7. Output directory: leave empty/default.

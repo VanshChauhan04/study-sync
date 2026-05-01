@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  relationMode = "prisma"
+}
+
+model User {
+  id      String @id @default(cuid())
+  clerkId String @unique
+  email   String @unique
+
+  groupsCreated Group[]
+  memberships   Membership[]
+  messages      Message[]
+  plans         Plan[]
+}
+
+model Group {
+  id         String @id @default(cuid())
+  name       String
+  subject    String
+  maxMembers Int
+  createdBy  String
+
+  creator     User         @relation(fields: [createdBy], references: [id])
+  memberships Membership[]
+  messages    Message[]
+}
+
+model Membership {
+  id      String @id @default(cuid())
+  userId  String
+  groupId String
+
+  user  User  @relation(fields: [userId], references: [id])
+  group Group @relation(fields: [groupId], references: [id])
+
+  @@unique([userId, groupId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+  userId    String
+  groupId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  group Group @relation(fields: [groupId], references: [id])
+}
+
+model Plan {
+  id        String   @id @default(cuid())
+  userId    String
+  content   Json
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
