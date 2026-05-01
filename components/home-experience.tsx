@@ -315,6 +315,9 @@ export function HomeExperience({
       return;
     }
 
+    setAiAnswer("StudySync AI is thinking...");
+    setToast("StudySync AI is writing an answer...");
+
     const res = await fetch("/api/ai/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -322,6 +325,8 @@ export function HomeExperience({
     });
 
     if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      setAiAnswer(data?.error ?? "AI request failed. Try again.");
       setToast("AI request failed. Try again.");
       return;
     }
@@ -443,17 +448,34 @@ export function HomeExperience({
     }
 
     if (!isSignedIn) {
+      const demoMessage = createStudentMessage(message, profile.name.split(" ")[0] || profile.name);
       setMessagesByGroup((current) => ({
         ...current,
         [selectedGroup.id]: [
           ...(current[selectedGroup.id] ?? activeSession.messages),
-          createStudentMessage(message, profile.name.split(" ")[0] || profile.name)
+          demoMessage
         ]
       }));
       setChatDraft("");
       setToast("Sign in to persist messages to the group room.");
       return;
     }
+
+    const optimisticId = `pending-${Date.now()}`;
+    const optimisticMessage: ChatMessage = {
+      id: optimisticId,
+      sender: profile.name.split(" ")[0] || profile.name,
+      role: "student",
+      content: message,
+      time: "Now"
+    };
+
+    setMessagesByGroup((current) => ({
+      ...current,
+      [selectedGroup.id]: [...(current[selectedGroup.id] ?? []), optimisticMessage]
+    }));
+    setChatDraft("");
+    setToast("Sending message...");
 
     const res = await fetch("/api/messages", {
       method: "POST",
@@ -462,6 +484,10 @@ export function HomeExperience({
     });
 
     if (!res.ok) {
+      setMessagesByGroup((current) => ({
+        ...current,
+        [selectedGroup.id]: (current[selectedGroup.id] ?? []).filter((item) => item.id !== optimisticId)
+      }));
       setToast("Message failed to send. Join the group first.");
       return;
     }
@@ -483,9 +509,10 @@ export function HomeExperience({
 
     setMessagesByGroup((current) => ({
       ...current,
-      [selectedGroup.id]: [...(current[selectedGroup.id] ?? []), formatted]
+      [selectedGroup.id]: (current[selectedGroup.id] ?? []).map((item) =>
+        item.id === optimisticId ? formatted : item
+      )
     }));
-    setChatDraft("");
     setToast("Message sent.");
   }
 

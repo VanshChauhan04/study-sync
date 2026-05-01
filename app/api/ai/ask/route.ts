@@ -50,41 +50,46 @@ export async function POST(req: Request) {
   const geminiKey = process.env.GEMINI_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
 
-  if (geminiKey) {
-    const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-    const genAI = new GoogleGenerativeAI(geminiKey);
-    const model = genAI.getGenerativeModel({ model: modelName });
-    const prompt = [
-      "You are StudySync AI. Keep answers concise, practical, and aligned to the group subject.",
-      `Subject: ${group.subject}`,
-      `Group: ${group.name}`,
-      `Question: ${question}`
-    ].join("\n");
+  try {
+    if (geminiKey) {
+      const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+      const genAI = new GoogleGenerativeAI(geminiKey);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const prompt = [
+        "You are StudySync AI. Keep answers concise, practical, and aligned to the group subject.",
+        `Subject: ${group.subject}`,
+        `Group: ${group.name}`,
+        `Question: ${question}`
+      ].join("\n");
 
-    const result = await model.generateContent(prompt);
-    answer = result.response.text().trim() || fallbackAnswer(question, group.subject);
-  } else if (openaiKey) {
-    const client = new OpenAI({ apiKey: openaiKey });
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are StudySync AI. Keep answers concise, practical, and aligned to the group subject."
-        },
-        {
-          role: "user",
-          content: `Subject: ${group.subject}\nGroup: ${group.name}\nQuestion: ${question}`
-        }
-      ],
-      temperature: 0.4
-    });
+      const result = await model.generateContent(prompt);
+      answer = result.response.text().trim() || fallbackAnswer(question, group.subject);
+    } else if (openaiKey) {
+      const client = new OpenAI({ apiKey: openaiKey });
+      const completion = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are StudySync AI. Keep answers concise, practical, and aligned to the group subject."
+          },
+          {
+            role: "user",
+            content: `Subject: ${group.subject}\nGroup: ${group.name}\nQuestion: ${question}`
+          }
+        ],
+        temperature: 0.4
+      });
 
-    answer =
-      completion.choices[0]?.message?.content?.trim() ||
-      fallbackAnswer(question, group.subject);
-  } else {
+      answer =
+        completion.choices[0]?.message?.content?.trim() ||
+        fallbackAnswer(question, group.subject);
+    } else {
+      answer = fallbackAnswer(question, group.subject);
+    }
+  } catch (error) {
+    console.error("AI provider failed", error);
     answer = fallbackAnswer(question, group.subject);
   }
 
